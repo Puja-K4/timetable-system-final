@@ -1,4 +1,5 @@
 from flask import Flask, render_template, request, redirect, session, flash, url_for
+from flask import jsonify
 from firebase_config import db
 import pandas as pd
 
@@ -186,48 +187,271 @@ def upload_master():
     dept = session.get('department')
 
     if request.method == 'POST':
+        if 'file' not in request.files:
+            flash("No file selected.", "error")
+            return redirect(url_for('upload_master'))
+
         file = request.files['file']
 
-        faculty_df = pd.read_excel(file, sheet_name="Faculty")
-        subjects_df = pd.read_excel(file, sheet_name="Subjects")
-        classes_df = pd.read_excel(file, sheet_name="Classes")
-        timeslots_df = pd.read_excel(file, sheet_name="TimeSlots")
-        rooms_df = pd.read_excel(file, sheet_name="Rooms")
+        if not file or file.filename == '':
+            flash("Please choose an Excel file.", "error")
+            return redirect(url_for('upload_master'))
+
+        try:
+            excel_data = pd.ExcelFile(file)
+
+            faculty_df = pd.read_excel(excel_data, sheet_name="Faculty")
+            subjects_df = pd.read_excel(excel_data, sheet_name="Subjects")
+            classes_df = pd.read_excel(excel_data, sheet_name="Classes")
+            timeslots_df = pd.read_excel(excel_data, sheet_name="TimeSlots")
+            rooms_df = pd.read_excel(excel_data, sheet_name="Rooms")
+            class_subjects_df = pd.read_excel(excel_data, sheet_name="ClassSubjects")
+
+        except Exception as e:
+            flash(f"Error reading Excel file: {str(e)}", "error")
+            return redirect(url_for('upload_master'))
+
+        # Faculty
+        existing_faculty = set()
+        for doc in db.collection("faculty").where("department", "==", dept).stream():
+            data = doc.to_dict()
+            existing_faculty.add(normalize_text(data.get("name", "")).lower())
 
         for _, row in faculty_df.iterrows():
-            db.collection("faculty").add({
-                "name": str(row['name']).strip(),
-                "department": dept
-            })
+            name = normalize_text(row.get("name", ""))
+            if not name:
+                continue
+            if name.lower() not in existing_faculty:
+                db.collection("faculty").add({
+                    "name": name,
+                    "department": dept
+                })
+                existing_faculty.add(name.lower())
+
+        # Subjects
+        existing_subjects = set()
+        for doc in db.collection("subjects").where("department", "==", dept).stream():
+            data = doc.to_dict()
+            existing_subjects.add(normalize_text(data.get("name", "")).lower())
 
         for _, row in subjects_df.iterrows():
-            db.collection("subjects").add({
-                "name": str(row['subject']).strip(),
-                "department": dept
-            })
+            subject_name = normalize_text(row.get("subject", ""))
+            if not subject_name:
+                continue
+            if subject_name.lower() not in existing_subjects:
+                db.collection("subjects").add({
+                    "name": subject_name,
+                    "department": dept
+                })
+                existing_subjects.add(subject_name.lower())
+
+        # Classes
+        existing_classes = set()
+        for doc in db.collection("classes").where("department", "==", dept).stream():
+            data = doc.to_dict()
+            existing_classes.add(normalize_text(data.get("name", "")).lower())
 
         for _, row in classes_df.iterrows():
-            db.collection("classes").add({
-                "name": str(row['class']).strip(),
-                "department": dept
-            })
+            class_name = normalize_text(row.get("class", ""))
+            if not class_name:
+                continue
+            if class_name.lower() not in existing_classes:
+                db.collection("classes").add({
+                    "name": class_name,
+                    "department": dept
+                })
+                existing_classes.add(class_name.lower())
+
+        # TimeSlots
+        existing_slots = set()
+        for doc in db.collection("timeslots").stream():
+            data = doc.to_dict()
+            existing_slots.add(normalize_text(data.get("slot", "")).lower())
 
         for _, row in timeslots_df.iterrows():
-            db.collection("timeslots").add({
-                "slot": str(row['slot']).strip()
-            })
-            
+            slot = normalize_text(row.get("slot", ""))
+            if not slot:
+                continue
+            if slot.lower() not in existing_slots:
+                db.collection("timeslots").add({
+                    "slot": slot
+                })
+                existing_slots.add(slot.lower())
+
+        # Rooms
+        existing_rooms = set()
+        for doc in db.collection("rooms").stream():
+            data = doc.to_dict()
+            existing_rooms.add(normalize_text(data.get("room", "")).lower())
+
         for _, row in rooms_df.iterrows():
-            db.collection("rooms").add({
-            "room": str(row['room']).strip()
+            room = normalize_text(row.get("room", ""))
+            if not room:
+                continue
+            if room.lower() not in existing_rooms:
+                db.collection("rooms").add({
+                    "room": room
+                })
+                existing_rooms.add(room.lower())
+
+        # Refresh valid classes and subjects after upload
+        valid_classes = set()
+        for doc in db.collection("classes").where("department", "==", dept).stream():
+            data = doc.to_dict()
+            valid_classes.add(normalize_text(data.get("name", "")))
+
+        valid_subjects = set()
+        for doc in db.collection("subjects").where("department", "==", dept).stream():
+            data = doc.to_dict()
+            valid_subjects.add(normalize_text(data.get("name", "")))
+
+        allowed_terms = {"Term I", "Term II"}
+
+        # ClassSubjects mapping
+        existing_mappings = set()
+        for doc in db.collection("class_subjects").where("department", "==", dept).stream():
+            data = doc.to_dict()
+            key = (
+                normalize_text(data.get("class", "")),
+                normalize_text(data.get("term", "")),
+                normalize_text(data.get("subject", ""))
+            )
+            existing_mappings.add(key)
+
+        added_mappings = 0
+        skipped_mappings = 0
+
+        for _, row in class_subjects_df.iterrows():
+            class_name = normalize_text(row.get("class", ""))
+            term = normalize_text(row.get("term", ""))
+            subject_name = normalize_text(row.get("subject", ""))
+
+            if not class_name or not term or not subject_name:
+                skipped_mappings += 1
+                continue
+
+            if class_name not in valid_classes:
+                skipped_mappings += 1
+                continue
+
+            if subject_name not in valid_subjects:
+                skipped_mappings += 1
+                continue
+
+            if term not in allowed_terms:
+                skipped_mappings += 1
+                continue
+
+            key = (class_name, term, subject_name)
+
+            if key in existing_mappings:
+                skipped_mappings += 1
+                continue
+
+            db.collection("class_subjects").add({
+                "department": dept,
+                "class": class_name,
+                "term": term,
+                "subject": subject_name
+            })
+            existing_mappings.add(key)
+            added_mappings += 1
+
+        flash(f"Master data uploaded successfully. ClassSubjects added: {added_mappings}, skipped: {skipped_mappings}", "success")
+        return redirect(url_for('upload_master'))
+
+    success = request.args.get('success')
+    return render_template("upload_master.html", success=success)
+
+@app.route('/admin/class-subjects', methods=['GET', 'POST'])
+def class_subjects():
+
+    if not session.get('admin'):
+        return redirect('/admin/login')
+
+    dept = session.get('department')
+
+    classes = safe_list_from_collection("classes", "name", dept)
+    subjects = safe_list_from_collection("subjects", "name", dept)
+    terms = ["Term I", "Term II"]
+
+    if request.method == 'POST':
+        class_name = normalize_text(request.form.get('class', ''))
+        term = normalize_text(request.form.get('term', ''))
+        subject = normalize_text(request.form.get('subject', ''))
+
+        if not class_name or not term or not subject:
+            flash("Class, term, and subject are required.", "error")
+            return redirect(url_for('class_subjects'))
+
+        if class_name not in classes:
+            flash("Invalid class selected.", "error")
+            return redirect(url_for('class_subjects'))
+
+        if subject not in subjects:
+            flash("Invalid subject selected.", "error")
+            return redirect(url_for('class_subjects'))
+
+        if term not in terms:
+            flash("Invalid term selected.", "error")
+            return redirect(url_for('class_subjects'))
+
+        existing = db.collection("class_subjects") \
+            .where("department", "==", dept) \
+            .where("class", "==", class_name) \
+            .where("term", "==", term) \
+            .where("subject", "==", subject) \
+            .stream()
+
+        for _ in existing:
+            flash("This subject is already assigned to this class and term.", "error")
+            return redirect(url_for('class_subjects'))
+
+        db.collection("class_subjects").add({
+            "department": dept,
+            "class": class_name,
+            "term": term,
+            "subject": subject
         })
 
-        return redirect('/admin/upload-master?success=1')
+        flash("Subject assigned to class and term successfully.", "success")
+        return redirect(url_for('class_subjects'))
 
-    # 👇 GET request
-    success = request.args.get('success')
+    docs = db.collection("class_subjects") \
+        .where("department", "==", dept) \
+        .stream()
 
-    return render_template("upload_master.html", success=success)
+    data = []
+    for d in docs:
+        item = d.to_dict()
+        item["id"] = d.id
+        data.append(item)
+
+    data.sort(key=lambda x: (x.get("class", ""), x.get("term", ""), x.get("subject", "")))
+
+    return render_template(
+        "class_subjects.html",
+        classes=classes,
+        subjects=subjects,
+        terms=terms,
+        data=data
+    )
+
+@app.route('/admin/delete-class-subject/<id>')
+def delete_class_subject(id):
+
+    if not session.get('admin'):
+        return redirect('/admin/login')
+
+    doc = db.collection("class_subjects").document(id).get()
+
+    if not doc.exists:
+        flash("Mapping not found.", "error")
+        return redirect(url_for('class_subjects'))
+
+    db.collection("class_subjects").document(id).delete()
+    flash("Mapping deleted successfully.", "success")
+    return redirect(url_for('class_subjects'))
 
 @app.route('/admin/upload-faculty', methods=['POST'])
 def upload_faculty():
@@ -317,116 +541,6 @@ def delete_faculty(id):
     db.collection("faculty").document(id).delete()
     flash("Faculty deleted successfully.", "success")
     return redirect(url_for('faculty'))
-
-
-@app.route('/admin/add-timetable', methods=['GET', 'POST'])
-def add_timetable():
-
-    if not session.get('admin'):
-        return redirect('/admin/login')
-
-    if not session.get('year') or not session.get('term'):
-        return redirect('/admin/select-session')
-
-    dept = session.get('department')
-
-    classes = safe_list_from_collection("classes", "name", dept)
-    subjects = safe_list_from_collection("subjects", "name", dept)
-    faculty = safe_list_from_collection("faculty", "name", dept)
-    timeslots = safe_list_from_collection("timeslots", "slot")
-    rooms = safe_list_from_collection("rooms", "room")
-
-    message = ""
-
-    allowed_days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
-    allowed_types = ["Theory", "Practical"]
-
-    if request.method == 'POST':
-
-        data = {
-            "department": dept,
-            "year": normalize_text(request.form.get('year', '')),
-            "term": normalize_text(request.form.get('term', '')),
-            "class": normalize_text(request.form.get('class', '')),
-            "day": normalize_text(request.form.get('day', '')),
-            "time": normalize_text(request.form.get('time', '')),
-            "subject": normalize_text(request.form.get('subject', '')),
-            "faculty": normalize_text(request.form.get('faculty', '')),
-            "type": normalize_text(request.form.get('type', '')),
-            "batch": normalize_text(request.form.get('batch', '')),
-            "room": normalize_text(request.form.get('room', ''))
-        }
-
-        required_fields = ['year', 'term', 'class', 'day', 'time', 'subject', 'faculty', 'type', 'room']
-        for field in required_fields:
-            if not data[field]:
-                message = f"❌ {field.capitalize()} is required."
-                return render_template("add_timetable.html", **locals())
-
-        if data['day'] not in allowed_days:
-            message = "❌ Invalid day selected."
-            return render_template("add_timetable.html", **locals())
-
-        if data['type'] not in allowed_types:
-            message = "❌ Invalid lecture type selected."
-            return render_template("add_timetable.html", **locals())
-
-        if data['time'] not in timeslots:
-            message = "❌ Invalid time slot selected."
-            return render_template("add_timetable.html", **locals())
-
-        if data['class'] not in classes:
-            message = "❌ Invalid class selected."
-            return render_template("add_timetable.html", **locals())
-
-        if data['subject'] not in subjects:
-            message = "❌ Invalid subject selected."
-            return render_template("add_timetable.html", **locals())
-
-        if data['faculty'] not in faculty:
-            message = "❌ Invalid faculty selected."
-            return render_template("add_timetable.html", **locals())
-
-        if data['room'] not in rooms:
-            message = "❌ Invalid room selected."
-            return render_template("add_timetable.html", **locals())
-
-        if data['type'] == "Practical" and not data['batch']:
-            message = "❌ Batch is required for practical."
-            return render_template("add_timetable.html", **locals())
-
-        conflicts = db.collection("timetable") \
-            .where("day", "==", data['day']) \
-            .where("time", "==", data['time']) \
-            .where("department", "==", dept) \
-            .where("year", "==", data['year']) \
-            .where("term", "==", data['term']) \
-            .stream()
-
-        for c in conflicts:
-            c = c.to_dict()
-
-            if c['class'] == data['class'] and data['type'] == "Theory":
-                message = "❌ Class already has lecture at this time!"
-                return render_template("add_timetable.html", **locals())
-
-            if c['faculty'] == data['faculty']:
-                message = "❌ Faculty already assigned at this time!"
-                return render_template("add_timetable.html", **locals())
-
-            if c['room'] == data['room']:
-                message = "❌ Room already occupied!"
-                return render_template("add_timetable.html", **locals())
-
-            if data['type'] == "Practical":
-                if c['class'] == data['class'] and c.get('batch', '') == data.get('batch', ''):
-                    message = "❌ Same batch already assigned at this time!"
-                    return render_template("add_timetable.html", **locals())
-
-        db.collection("timetable").add(data)
-        message = "✅ Timetable entry added successfully!"
-
-    return render_template("add_timetable.html", **locals())
 
 @app.route('/department')
 def department():
@@ -552,6 +666,35 @@ def classes_admin():
 
     return render_template("classes.html", data=data)
 
+@app.route('/admin/delete-class/<id>')
+def delete_class(id):
+
+    if not session.get('admin'):
+        return redirect('/admin/login')
+
+    class_doc = db.collection("classes").document(id).get()
+
+    if not class_doc.exists:
+        flash("Class not found.", "error")
+        return redirect(url_for('classes_admin'))
+
+    class_data = class_doc.to_dict()
+    class_name = class_data.get("name", "")
+    dept = class_data.get("department", "")
+
+    timetable_docs = db.collection("timetable") \
+        .where("class", "==", class_name) \
+        .where("department", "==", dept) \
+        .stream()
+
+    for _ in timetable_docs:
+        flash("Cannot delete class because it is used in timetable.", "error")
+        return redirect(url_for('classes_admin'))
+
+    db.collection("classes").document(id).delete()
+    flash("Class deleted successfully.", "success")
+    return redirect(url_for('classes_admin'))
+
 @app.route('/admin/subjects', methods=['GET', 'POST'])
 def subjects_admin():
 
@@ -592,6 +735,221 @@ def subjects_admin():
 
     return render_template("subjects.html", data=data)
 
+@app.route('/admin/delete-subject/<id>')
+def delete_subject(id):
+
+    if not session.get('admin'):
+        return redirect('/admin/login')
+
+    subject_doc = db.collection("subjects").document(id).get()
+
+    if not subject_doc.exists:
+        flash("Subject not found.", "error")
+        return redirect(url_for('subjects_admin'))
+
+    subject_data = subject_doc.to_dict()
+    subject_name = subject_data.get("name", "")
+    dept = subject_data.get("department", "")
+
+    timetable_docs = db.collection("timetable") \
+        .where("subject", "==", subject_name) \
+        .where("department", "==", dept) \
+        .stream()
+
+    for _ in timetable_docs:
+        flash("Cannot delete subject because it is used in timetable.", "error")
+        return redirect(url_for('subjects_admin'))
+
+    db.collection("subjects").document(id).delete()
+    flash("Subject deleted successfully.", "success")
+    return redirect(url_for('subjects_admin'))
+
+@app.route('/admin/get-subjects')
+def get_subjects_for_class():
+
+    if not session.get('admin'):
+        return jsonify([])
+
+    dept = session.get('department')
+    class_name = normalize_text(request.args.get('class', ''))
+    term = normalize_text(request.args.get('term', ''))
+
+    if not class_name or not term:
+        return jsonify([])
+
+    docs = db.collection("class_subjects") \
+        .where("department", "==", dept) \
+        .where("class", "==", class_name) \
+        .where("term", "==", term) \
+        .stream()
+
+    subjects = sorted(set([
+        d.to_dict().get("subject")
+        for d in docs if d.to_dict().get("subject")
+    ]))
+
+    return jsonify(subjects)
+
+@app.route('/admin/add-timetable', methods=['GET', 'POST'])
+def add_timetable():
+
+    if not session.get('admin'):
+        return redirect('/admin/login')
+
+    if not session.get('year') or not session.get('term'):
+        return redirect('/admin/select-session')
+
+    dept = session.get('department')
+
+    classes = safe_list_from_collection("classes", "name", dept)
+    selected_class = normalize_text(request.form.get('class', ''))
+    selected_term = session.get('term')
+
+    subjects = []
+
+    if selected_class and selected_term:
+        docs = db.collection("class_subjects") \
+            .where("department", "==", dept) \
+            .where("class", "==", selected_class) \
+            .where("term", "==", selected_term) \
+            .stream()
+
+        subjects = sorted(set([
+            d.to_dict().get("subject")
+            for d in docs if d.to_dict().get("subject")
+        ]))
+    faculty = safe_list_from_collection("faculty", "name", dept)
+    timeslots = safe_list_from_collection("timeslots", "slot")
+    rooms = safe_list_from_collection("rooms", "room")
+
+    message = ""
+
+    allowed_days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+    allowed_types = ["Theory", "Practical"]
+
+    if request.method == 'POST':
+
+        data = {
+            "department": dept,
+            "year": normalize_text(request.form.get('year', '')),
+            "term": normalize_text(request.form.get('term', '')),
+            "class": normalize_text(request.form.get('class', '')),
+            "day": normalize_text(request.form.get('day', '')),
+            "time": normalize_text(request.form.get('time', '')),
+            "subject": normalize_text(request.form.get('subject', '')),
+            "faculty": normalize_text(request.form.get('faculty', '')),
+            "type": normalize_text(request.form.get('type', '')),
+            "batch": normalize_text(request.form.get('batch', '')),
+            "room": normalize_text(request.form.get('room', ''))
+        }
+        
+        if data['type'] == "Theory":
+            data['batch'] = ''
+
+        required_fields = ['year', 'term', 'class', 'day', 'time', 'subject', 'faculty', 'type', 'room']
+        for field in required_fields:
+            if not data[field]:
+                message = f"❌ {field.capitalize()} is required."
+                break
+
+        if not message and data['day'] not in allowed_days:
+            message = "❌ Invalid day selected."
+
+        if not message and data['type'] not in allowed_types:
+            message = "❌ Invalid lecture type selected."
+
+        if not message and data['time'] not in timeslots:
+            message = "❌ Invalid time slot selected."
+
+        if not message and data['class'] not in classes:
+            message = "❌ Invalid class selected."
+
+        if not message and data['subject'] not in subjects:
+            message = "❌ Invalid subject selected."
+
+        if not message and data['faculty'] not in faculty:
+            message = "❌ Invalid faculty selected."
+
+        if not message and data['room'] not in rooms:
+            message = "❌ Invalid room selected."
+
+        if not message and data['type'] == "Practical" and not data['batch']:
+            message = "❌ Batch is required for practical."
+
+        if not message:
+            conflicts = db.collection("timetable") \
+                .where("day", "==", data['day']) \
+                .where("time", "==", data['time']) \
+                .where("department", "==", dept) \
+                .where("year", "==", data['year']) \
+                .where("term", "==", data['term']) \
+                .stream()
+
+            for c in conflicts:
+                c = c.to_dict()
+
+                if c['class'] == data['class'] and data['type'] == "Theory":
+                    message = "❌ Class already has lecture at this time!"
+                    break
+
+                if c['faculty'] == data['faculty']:
+                    message = "❌ Faculty already assigned at this time!"
+                    break
+
+                if c['room'] == data['room']:
+                    message = "❌ Room already occupied!"
+                    break
+
+                if data['type'] == "Practical":
+                    if c['class'] == data['class'] and c.get('batch', '') == data.get('batch', ''):
+                        message = "❌ Same batch already assigned at this time!"
+                        break
+
+        if not message:
+            db.collection("timetable").add(data)
+            flash("Timetable entry added successfully.", "success")
+            return redirect(url_for('add_timetable'))
+
+    # existing timetable list for this admin session
+    docs = db.collection("timetable") \
+        .where("department", "==", dept) \
+        .where("year", "==", session.get('year')) \
+        .where("term", "==", session.get('term')) \
+        .stream()
+
+    entries = []
+    for d in docs:
+        item = d.to_dict()
+        item['id'] = d.id
+        entries.append(item)
+
+    day_order = {
+        "Monday": 1,
+        "Tuesday": 2,
+        "Wednesday": 3,
+        "Thursday": 4,
+        "Friday": 5,
+        "Saturday": 6
+    }
+
+    entries.sort(key=lambda x: (
+        x.get('class', ''),
+        day_order.get(x.get('day', ''), 99),
+        x.get('time', '')
+    ))
+
+    return render_template(
+        "add_timetable.html",
+        dept=dept,
+        classes=classes,
+        subjects=subjects,
+        faculty=faculty,
+        timeslots=timeslots,
+        rooms=rooms,
+        message=message,
+        entries=entries
+    )
+    
 @app.route('/admin/delete-timetable/<id>')
 def delete_timetable(id):
 
@@ -652,6 +1010,9 @@ def edit_timetable(id):
             "batch": normalize_text(request.form.get('batch', '')),
             "room": normalize_text(request.form.get('room', ''))
         }
+        
+        if data['type'] == "Theory":
+            data['batch'] = ''
 
         required_fields = ['year', 'term', 'class', 'day', 'time', 'subject', 'faculty', 'type', 'room']
         for field in required_fields:

@@ -1,130 +1,222 @@
 {% extends "base.html" %}
-
 {% block content %}
 
 <div class="card shadow p-4">
-  <h3 class="mb-4 text-center">Add Timetable</h3>
+    <h3 class="mb-4 text-center">Add Timetable</h3>
 
-  {% if message %}
-  <div class="alert alert-danger text-center">{{ message }}</div>
-  {% endif %}
+    {% if message %}
+    <div class="alert alert-danger text-center">{{ message }}</div>
+    {% endif %}
 
-  <form method="POST">
+    <form method="POST" id="timetableForm">
+        <input type="hidden" name="year" value="{{ session.get('year') }}">
+        <input type="hidden" name="term" value="{{ session.get('term') }}">
+        <input type="hidden" name="department" value="{{ dept }}">
 
-    <!-- ✅ Hidden fields (MANDATORY) -->
-    <input type="hidden" name="year" value="{{ session.get('year') }}">
-    <input type="hidden" name="term" value="{{ session.get('term') }}">
-    <input type="hidden" name="department" value="{{ dept }}">
+        <div class="row mb-3">
+            <div class="col-md-6">
+                <label class="form-label">Year</label>
+                <input class="form-control bg-light" value="{{ session.get('year') or 'Not Set' }}" readonly>
+            </div>
 
-    <!-- ✅ DISPLAY Year + Term -->
-    <div class="row mb-3">
-      <div class="col">
-        <label>Year</label>
-        <input class="form-control" value="{{ session.get('year') or 'Not Set' }}" readonly>
-      </div>
+            <div class="col-md-6">
+                <label class="form-label">Term</label>
+                <input class="form-control bg-light" value="{{ session.get('term') or 'Not Set' }}" readonly>
+            </div>
+        </div>
 
-      <div class="col">
-        <label>Term</label>
-        <input class="form-control" value="{{ session.get('term') or 'Not Set' }}" readonly>
-      </div>
-    </div>
+        <div class="row mb-3">
+            <div class="col-md-6">
+                <label class="form-label">Department</label>
+                <input class="form-control bg-light" value="{{ dept }}" readonly>
+            </div>
 
-    <!-- ✅ Department + Class -->
-    <div class="row mb-3">
-      <div class="col">
-        <label>Department</label>
-        <input class="form-control" value="{{ dept }}" readonly>
-      </div>
+            <div class="col-md-6">
+                <label class="form-label">Class</label>
+                <select name="class" id="classField" class="form-select" required onchange="loadSubjects()">
+                    <option value="">Select Class</option>
+                    {% for c in classes %}
+                    <option value="{{ c }}" {% if request.form.get('class') == c %}selected{% endif %}>{{ c }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
 
-      <div class="col">
-        <label>Class</label>
-        <select name="class" class="form-control" required>
-          {% for c in classes %}
-          <option value="{{ c }}">{{ c }}</option>
-          {% endfor %}
-        </select>
-      </div>
-    </div>
+        <div class="row mb-3">
+            <div class="col-md-4">
+                <label class="form-label">Day</label>
+                <select name="day" class="form-select" required>
+                    <option value="">Select Day</option>
+                    {% for d in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] %}
+                    <option value="{{ d }}" {% if request.form.get('day') == d %}selected{% endif %}>{{ d }}</option>
+                    {% endfor %}
+                </select>
+            </div>
 
-    <!-- ✅ Day + Time -->
-    <div class="row mb-3">
-      <div class="col">
-        <label>Day</label>
-        <select name="day" class="form-control" required>
-          <option>Monday</option>
-          <option>Tuesday</option>
-          <option>Wednesday</option>
-          <option>Thursday</option>
-          <option>Friday</option>
-          <option>Saturday</option>
-        </select>
-      </div>
+            <div class="col-md-4">
+                <label class="form-label">Time</label>
+                <select name="time" class="form-select" required>
+                    <option value="">Select Time Slot</option>
+                    {% for t in timeslots %}
+                    <option value="{{ t }}" {% if request.form.get('time') == t %}selected{% endif %}>{{ t }}</option>
+                    {% endfor %}
+                </select>
+            </div>
 
-      <div class="col">
-        <label>Time</label>
-        <select name="time" class="form-control" required>
-          {% for t in timeslots %}
-          <option value="{{ t }}">{{ t }}</option>
-          {% endfor %}
-        </select>
-      </div>
-    </div>
+            <div class="col-md-4">
+                <label class="form-label">Type</label>
+                <select name="type" id="typeField" class="form-select" required onchange="toggleBatchField()">
+                    <option value="">Select Type</option>
+                    <option value="Theory" {% if request.form.get('type') == "Theory" %}selected{% endif %}>Theory</option>
+                    <option value="Practical" {% if request.form.get('type') == "Practical" %}selected{% endif %}>Practical</option>
+                </select>
+            </div>
+        </div>
 
-    <!-- ✅ Subject + Faculty -->
-    <div class="row mb-3">
-      <div class="col">
-        <label>Subject</label>
-        <select name="subject" class="form-control" required>
-          {% for s in subjects %}
-          <option value="{{ s }}">{{ s }}</option>
-          {% endfor %}
-        </select>
-      </div>
+        <div class="row mb-3">
+            <div class="col-md-6">
+                <label class="form-label">Subject</label>
+                <select name="subject" id="subjectField" class="form-select" required>
+                    <option value="">Select Subject</option>
+                </select>
+            </div>
 
-      <div class="col">
-        <label>Faculty</label>
-        <select name="faculty" class="form-control" required>
-          {% for f in faculty %}
-          <option value="{{ f }}">{{ f }}</option>
-          {% endfor %}
-        </select>
-      </div>
-    </div>
+            <div class="col-md-6">
+                <label class="form-label">Faculty</label>
+                <select name="faculty" class="form-select" required>
+                    <option value="">Select Faculty</option>
+                    {% for f in faculty %}
+                    <option value="{{ f }}" {% if request.form.get('faculty') == f %}selected{% endif %}>{{ f }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </div>
 
-    <!-- ✅ Type + Room -->
-    <div class="row mb-3">
-      <div class="col">
-        <label>Type</label>
-        <select name="type" class="form-control" required>
-          <option>Theory</option>
-          <option>Practical</option>
-        </select>
-      </div>
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <label class="form-label">Room</label>
+                <select name="room" class="form-select" required>
+                    <option value="">Select Room</option>
+                    {% for r in rooms %}
+                    <option value="{{ r }}" {% if request.form.get('room') == r %}selected{% endif %}>{{ r }}</option>
+                    {% endfor %}
+                </select>
+            </div>
 
-      <div class="col">
-        <label>Room</label>
-        <select name="room" class="form-control" required>
-          {% for r in rooms %}
-          <option value="{{ r }}">{{ r }}</option>
-          {% endfor %}
-        </select>
-      </div>
-    </div>
+            <div class="col-md-6" id="batchFieldWrapper">
+                <label class="form-label">Batch</label>
+                <input type="text" name="batch" id="batchField" class="form-control" placeholder="Required only for Practical" value="{{ request.form.get('batch', '') }}">
+            </div>
+        </div>
 
-    <!-- ✅ Batch (only for practical) -->
-    <div class="mb-3">
-      <label>Batch (Optional)</label>
-      <input type="text" name="batch" class="form-control" placeholder="A1 / B1">
-    </div>
-
-    <button class="btn btn-success w-100">
-      Add Timetable
-    </button>
-
-  </form>
+        <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-primary">Add Timetable</button>
+            <a href="/admin/dashboard" class="btn btn-secondary">Back</a>
+        </div>
+    </form>
 </div>
 
-<br>
-<a href="/admin/dashboard" class="btn btn-secondary">Back</a>
+<div class="card shadow p-4 mt-4">
+    <h4 class="mb-3">Existing Timetable Entries</h4>
+
+    {% if entries %}
+    <div class="table-responsive">
+        <table class="table table-bordered table-hover align-middle">
+            <thead class="table-dark">
+                <tr>
+                    <th>#</th>
+                    <th>Class</th>
+                    <th>Day</th>
+                    <th>Time</th>
+                    <th>Subject</th>
+                    <th>Faculty</th>
+                    <th>Type</th>
+                    <th>Batch</th>
+                    <th>Room</th>
+                    <th style="width: 170px;">Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for e in entries %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>{{ e.class }}</td>
+                    <td>{{ e.day }}</td>
+                    <td>{{ e.time }}</td>
+                    <td>{{ e.subject }}</td>
+                    <td>{{ e.faculty }}</td>
+                    <td>{{ e.type }}</td>
+                    <td>{{ e.batch or '-' }}</td>
+                    <td>{{ e.room }}</td>
+                    <td>
+                        <a href="/admin/edit-timetable/{{ e.id }}" class="btn btn-sm btn-warning">Edit</a>
+                        <a href="/admin/delete-timetable/{{ e.id }}"
+                           class="btn btn-sm btn-danger"
+                           onclick="return confirm('Delete this timetable entry?')">
+                           Delete
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="alert alert-info mb-0">No timetable entries added yet for this session.</div>
+    {% endif %}
+</div>
+
+<script>
+function toggleBatchField() {
+    const typeField = document.getElementById("typeField");
+    const batchWrapper = document.getElementById("batchFieldWrapper");
+    const batchInput = document.getElementById("batchField");
+
+    if (typeField.value === "Practical") {
+        batchWrapper.style.display = "block";
+    } else {
+        batchWrapper.style.display = "none";
+        batchInput.value = "";
+    }
+}
+
+async function loadSubjects() {
+    const classField = document.getElementById("classField");
+    const subjectField = document.getElementById("subjectField");
+    const selectedClass = classField.value;
+    const selectedTerm = "{{ session.get('term') }}";
+    const selectedSubject = "{{ request.form.get('subject', '') }}";
+
+    subjectField.innerHTML = '<option value="">Select Subject</option>';
+
+    if (!selectedClass || !selectedTerm) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/admin/get-subjects?class=${encodeURIComponent(selectedClass)}&term=${encodeURIComponent(selectedTerm)}`);
+        const subjects = await response.json();
+
+        subjects.forEach(subject => {
+            const option = document.createElement("option");
+            option.value = subject;
+            option.textContent = subject;
+
+            if (subject === selectedSubject) {
+                option.selected = true;
+            }
+
+            subjectField.appendChild(option);
+        });
+    } catch (error) {
+        console.error("Error loading subjects:", error);
+    }
+}
+
+document.addEventListener("DOMContentLoaded", function() {
+    toggleBatchField();
+    loadSubjects();
+});
+</script>
 
 {% endblock %}

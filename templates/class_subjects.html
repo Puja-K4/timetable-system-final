@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card shadow p-4">
+    <h3 class="mb-3">Assign Subjects to Class and Term</h3>
+    <p class="text-muted">Department: {{ session.get('department') }}</p>
+
+    <form method="POST" class="row g-3 mb-4">
+        <div class="col-md-4">
+            <label class="form-label">Class</label>
+            <select name="class" class="form-select" required>
+                <option value="">Select Class</option>
+                {% for c in classes %}
+                <option value="{{ c }}">{{ c }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="col-md-4">
+            <label class="form-label">Term</label>
+            <select name="term" class="form-select" required>
+                <option value="">Select Term</option>
+                {% for t in terms %}
+                <option value="{{ t }}">{{ t }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="col-md-4">
+            <label class="form-label">Subject</label>
+            <select name="subject" class="form-select" required>
+                <option value="">Select Subject</option>
+                {% for s in subjects %}
+                <option value="{{ s }}">{{ s }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="col-12">
+            <button type="submit" class="btn btn-primary">Assign Subject</button>
+            <a href="/admin/dashboard" class="btn btn-secondary">Back</a>
+        </div>
+    </form>
+</div>
+
+<div class="card shadow p-4 mt-4">
+    <h4 class="mb-3">Assigned Subjects</h4>
+
+    {% if data %}
+    <div class="table-responsive">
+        <table class="table table-bordered table-hover align-middle">
+            <thead class="table-dark">
+                <tr>
+                    <th>#</th>
+                    <th>Class</th>
+                    <th>Term</th>
+                    <th>Subject</th>
+                    <th style="width: 140px;">Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in data %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>{{ item.class }}</td>
+                    <td>{{ item.term }}</td>
+                    <td>{{ item.subject }}</td>
+                    <td>
+                        <a href="/admin/delete-class-subject/{{ item.id }}"
+                           class="btn btn-sm btn-danger"
+                           onclick="return confirm('Delete this mapping?')">
+                           Delete
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="alert alert-info mb-0">No class-term-subject mapping added yet.</div>
+    {% endif %}
+</div>
+
+{% endblock %}

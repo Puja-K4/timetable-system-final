@@ -1,0 +1,264 @@
+{% extends "base.html" %} {% block content %}
+
+<div class="card shadow p-4">
+  <h3 class="mb-3">Edit Timetable Entry</h3>
+
+  {% if message %}
+  <div class="alert alert-danger">{{ message }}</div>
+  {% endif %}
+
+  <form method="POST" id="timetableForm">
+    <div class="row mb-3">
+      <div class="col-md-6">
+        <label class="form-label">Year</label>
+        <input
+          type="text"
+          name="year"
+          class="form-control bg-light"
+          value="{{ entry.year }}"
+          readonly
+        />
+      </div>
+
+      <div class="col-md-6">
+        <label class="form-label">Term</label>
+        <input
+          type="text"
+          name="term"
+          class="form-control bg-light"
+          value="{{ entry.term }}"
+          readonly
+        />
+      </div>
+    </div>
+
+    <div class="row mb-3">
+      <div class="col-md-6">
+        <label class="form-label">Class</label>
+        <select
+          name="class"
+          id="classField"
+          class="form-select"
+          required
+          onchange="loadSubjects()"
+        >
+          <option value="">Select Class</option>
+          {% for c in classes %}
+          <option
+            value="{{ c }}"
+            {%
+            if
+            entry.class=""
+            ="c"
+            %}selected{%
+            endif
+            %}
+          >
+            {{ c }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="col-md-6">
+        <label class="form-label">Day</label>
+        <select name="day" class="form-select" required>
+          <option value="">Select Day</option>
+          {% for d in ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
+          "Saturday"] %}
+          <option value="{{ d }}" {% if entry.day="" ="d" %}selected{% endif %}>
+            {{ d }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <div class="row mb-3">
+      <div class="col-md-6">
+        <label class="form-label">Time Slot</label>
+        <select name="time" class="form-select" required>
+          <option value="">Select Time Slot</option>
+          {% for t in timeslots %}
+          <option
+            value="{{ t }}"
+            {%
+            if
+            entry.time=""
+            ="t"
+            %}selected{%
+            endif
+            %}
+          >
+            {{ t }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="col-md-6">
+        <label class="form-label">Subject</label>
+        <select name="subject" id="subjectField" class="form-select" required>
+          <option value="">Select Subject</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row mb-3">
+      <div class="col-md-6">
+        <label class="form-label">Faculty</label>
+        <select name="faculty" class="form-select" required>
+          <option value="">Select Faculty</option>
+          {% for f in faculty %}
+          <option
+            value="{{ f }}"
+            {%
+            if
+            entry.faculty=""
+            ="f"
+            %}selected{%
+            endif
+            %}
+          >
+            {{ f }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="col-md-6">
+        <label class="form-label">Type</label>
+        <select
+          name="type"
+          id="typeField"
+          class="form-select"
+          required
+          onchange="toggleBatchField()"
+        >
+          <option value="">Select Type</option>
+          <option
+            value="Theory"
+            {%
+            if
+            entry.type=""
+            ="Theory"
+            %}selected{%
+            endif
+            %}
+          >
+            Theory
+          </option>
+          <option
+            value="Practical"
+            {%
+            if
+            entry.type=""
+            ="Practical"
+            %}selected{%
+            endif
+            %}
+          >
+            Practical
+          </option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row mb-3">
+      <div class="col-md-6">
+        <label class="form-label">Room</label>
+        <select name="room" class="form-select" required>
+          <option value="">Select Room</option>
+          {% for r in rooms %}
+          <option
+            value="{{ r }}"
+            {%
+            if
+            entry.room=""
+            ="r"
+            %}selected{%
+            endif
+            %}
+          >
+            {{ r }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="col-md-6" id="batchFieldWrapper">
+        <label class="form-label">Batch</label>
+        <input
+          type="text"
+          name="batch"
+          id="batchField"
+          class="form-control"
+          value="{{ entry.batch or '' }}"
+        />
+        <div class="form-text">Required only for Practical.</div>
+      </div>
+    </div>
+
+    <div class="d-flex gap-2">
+      <button type="submit" class="btn btn-primary">Update Timetable</button>
+      <a href="/admin/add-timetable" class="btn btn-secondary">Back</a>
+    </div>
+  </form>
+</div>
+
+<script>
+  function toggleBatchField() {
+    const typeField = document.getElementById("typeField");
+    const batchWrapper = document.getElementById("batchFieldWrapper");
+    const batchInput = document.getElementById("batchField");
+
+    if (typeField.value === "Practical") {
+      batchWrapper.style.display = "block";
+    } else {
+      batchWrapper.style.display = "none";
+      batchInput.value = "";
+    }
+  }
+
+  async function loadSubjects() {
+    const classField = document.getElementById("classField");
+    const subjectField = document.getElementById("subjectField");
+    const selectedClass = classField.value;
+    const selectedTerm = "{{ session.get('term') }}";
+    const selectedSubject = "{{ request.form.get('subject', '') }}";
+
+    subjectField.innerHTML = '<option value="">Select Subject</option>';
+
+    if (!selectedClass || !selectedTerm) {
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `/admin/get-subjects?class=${encodeURIComponent(selectedClass)}&term=${encodeURIComponent(selectedTerm)}`,
+      );
+      const subjects = await response.json();
+
+      subjects.forEach((subject) => {
+        const option = document.createElement("option");
+        option.value = subject;
+        option.textContent = subject;
+
+        if (subject === selectedSubject) {
+          option.selected = true;
+        }
+
+        subjectField.appendChild(option);
+      });
+    } catch (error) {
+      console.error("Error loading subjects:", error);
+    }
+  }
+
+  document.addEventListener("DOMContentLoaded", function () {
+    toggleBatchField();
+    loadSubjects();
+  });
+</script>
+
+{% endblock %}

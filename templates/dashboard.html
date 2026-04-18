@@ -1,13 +1,16 @@
 {% extends "base.html" %} {% block content %}
 
 <div class="card shadow p-4">
-    <h3 class="mb-3">Admin Dashboard</h3>
+  <h3 class="mb-3">Admin Dashboard</h3>
 
-    <div class="d-flex gap-2 flex-wrap">
-        <a href="/admin/upload-master" class="btn btn-primary">Upload Master</a>
-        <a href="/admin/add-timetable" class="btn btn-success">Add Timetable</a>
-        <a href="/admin/faculty" class="btn btn-warning">Faculty</a>
-    </div>
+  <div class="d-flex gap-2 flex-wrap">
+    <a href="/admin/upload-master" class="btn btn-primary">Upload Master</a>
+    <a href="/admin/classes" class="btn btn-success">Classes</a>
+    <a href="/admin/subjects" class="btn btn-warning">Subjects</a>
+    <a href="/admin/faculty" class="btn btn-info">Faculty</a>
+    <a href="/admin/class-subjects" class="btn btn-secondary">Class Subjects</a>
+    <a href="/admin/add-timetable" class="btn btn-danger">Add Timetable</a>
+  </div>
 </div>
 
 {% endblock %}
