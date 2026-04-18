@@ -1,0 +1,90 @@
+{% extends "base.html" %} {% block content %}
+
+<div class="container mt-5">
+  <div class="card shadow p-4">
+    <h2 class="text-center mb-4">📅 College Timetable</h2>
+
+    <form action="/class" method="GET">
+      <div class="mb-3">
+        <label>Department</label>
+        <select name="department" class="form-control">
+          {% for d in departments %}
+          <option>{{ d }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="mb-3">
+        <label>Academic Year</label>
+        <select name="year" class="form-control">
+          {% for y in years %}
+          <option>{{ y }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="mb-3">
+        <label>Term</label>
+        <select name="term" class="form-control">
+          {% for t in terms %}
+          <option>{{ t }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="mb-3">
+        <label>Select Class</label>
+        <select name="class" class="form-control">
+          {% for c in classes %}
+          <option>{{ c }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <button
+        class="btn btn-primary w-100"
+        onclick="this.innerText = 'Loading...'"
+      >
+        View Timetable
+      </button>
+    </form>
+
+    <script>
+      document.getElementById("deptBtn").addEventListener("click", function () {
+        let dept = document.querySelector("[name='department']").value;
+        let year = document.querySelector("[name='year']").value;
+        let term = document.querySelector("[name='term']").value;
+
+        let url = `/department?department=${dept}&year=${year}&term=${term}`;
+
+        window.location.href = url;
+      });
+    </script>
+    <hr />
+
+    <div class="text-center mt-3">
+      <a id="deptBtn" class="btn btn-outline-secondary">
+        📊 View Department Timetable
+      </a>
+
+      <a href="/faculty-select" class="btn btn-outline-success">
+        👨‍🏫 Faculty View
+      </a>
+    </div>
+
+    <!-- ✅ MOVE SCRIPT HERE -->
+    <script>
+      document.getElementById("deptBtn").addEventListener("click", function () {
+        let dept = document.querySelector("[name='department']").value;
+        let year = document.querySelector("[name='year']").value;
+        let term = document.querySelector("[name='term']").value;
+
+        let url = `/department?department=${dept}&year=${year}&term=${term}`;
+
+        window.location.href = url;
+      });
+    </script>
+  </div>
+</div>
+
+{% endblock %}

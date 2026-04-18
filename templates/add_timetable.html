@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<div class="card shadow p-4">
+  <h3 class="mb-4 text-center">Add Timetable</h3>
+
+  {% if message %}
+  <div class="alert alert-danger text-center">{{ message }}</div>
+  {% endif %}
+
+  <form method="POST">
+
+    <!-- ✅ Hidden fields (MANDATORY) -->
+    <input type="hidden" name="year" value="{{ session.get('year') }}">
+    <input type="hidden" name="term" value="{{ session.get('term') }}">
+    <input type="hidden" name="department" value="{{ dept }}">
+
+    <!-- ✅ DISPLAY Year + Term -->
+    <div class="row mb-3">
+      <div class="col">
+        <label>Year</label>
+        <input class="form-control" value="{{ session.get('year') or 'Not Set' }}" readonly>
+      </div>
+
+      <div class="col">
+        <label>Term</label>
+        <input class="form-control" value="{{ session.get('term') or 'Not Set' }}" readonly>
+      </div>
+    </div>
+
+    <!-- ✅ Department + Class -->
+    <div class="row mb-3">
+      <div class="col">
+        <label>Department</label>
+        <input class="form-control" value="{{ dept }}" readonly>
+      </div>
+
+      <div class="col">
+        <label>Class</label>
+        <select name="class" class="form-control" required>
+          {% for c in classes %}
+          <option value="{{ c }}">{{ c }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <!-- ✅ Day + Time -->
+    <div class="row mb-3">
+      <div class="col">
+        <label>Day</label>
+        <select name="day" class="form-control" required>
+          <option>Monday</option>
+          <option>Tuesday</option>
+          <option>Wednesday</option>
+          <option>Thursday</option>
+          <option>Friday</option>
+          <option>Saturday</option>
+        </select>
+      </div>
+
+      <div class="col">
+        <label>Time</label>
+        <select name="time" class="form-control" required>
+          {% for t in timeslots %}
+          <option value="{{ t }}">{{ t }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <!-- ✅ Subject + Faculty -->
+    <div class="row mb-3">
+      <div class="col">
+        <label>Subject</label>
+        <select name="subject" class="form-control" required>
+          {% for s in subjects %}
+          <option value="{{ s }}">{{ s }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="col">
+        <label>Faculty</label>
+        <select name="faculty" class="form-control" required>
+          {% for f in faculty %}
+          <option value="{{ f }}">{{ f }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <!-- ✅ Type + Room -->
+    <div class="row mb-3">
+      <div class="col">
+        <label>Type</label>
+        <select name="type" class="form-control" required>
+          <option>Theory</option>
+          <option>Practical</option>
+        </select>
+      </div>
+
+      <div class="col">
+        <label>Room</label>
+        <select name="room" class="form-control" required>
+          {% for r in rooms %}
+          <option value="{{ r }}">{{ r }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <!-- ✅ Batch (only for practical) -->
+    <div class="mb-3">
+      <label>Batch (Optional)</label>
+      <input type="text" name="batch" class="form-control" placeholder="A1 / B1">
+    </div>
+
+    <button class="btn btn-success w-100">
+      Add Timetable
+    </button>
+
+  </form>
+</div>
+
+<br>
+<a href="/admin/dashboard" class="btn btn-secondary">Back</a>
+
+{% endblock %}

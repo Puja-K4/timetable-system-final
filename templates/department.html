@@ -1,0 +1,55 @@
+{% extends "base.html" %} {% block content %}
+
+<h2 style="text-align: center">Rayat Shikshan Santha's</h2>
+<h2 style="text-align: center">Karmaveer Bhaurao Patil College, Vashi</h2>
+<h2 style="text-align: center">[Empowered Autonomous]</h2>
+<h2 style="text-align: center">Department of {{ dept }}</h2>
+<h3 style="text-align: center">Academic Year {{ year }}</h3>
+<h3 style="text-align: center">TIME TABLE {{ term }}</h3>
+
+<table class="table table-bordered table-striped text-center">
+  <thead class="table-dark">
+    <tr>
+      <th>Time</th>
+      <th>Class</th>
+      <th>Monday</th>
+      <th>Tuesday</th>
+      <th>Wednesday</th>
+      <th>Thursday</th>
+      <th>Friday</th>
+      <th>Saturday</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for (time, cls), days in timetable.items() %}
+
+    <tr>
+      <td>{{ time }}</td>
+      <td>
+        <a
+          href="/class?class={{ cls }}&department={{ dept }}&year={{ year }}&term={{ term }}"
+        >
+          {{ cls }}
+        </a>
+      </td>
+
+      {% for day in
+      ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"] %}
+      <td>
+        {% for item in days[day] %} {{ item }} <br />
+        {% endfor %}
+      </td>
+      {% endfor %}
+    </tr>
+
+    {% endfor %}
+  </tbody>
+</table>
+
+<script>
+setTimeout(() => {
+    location.reload();
+}, 30000); // refresh every 30 sec
+</script>
+
+{% endblock %}

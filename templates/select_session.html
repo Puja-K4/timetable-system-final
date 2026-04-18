@@ -1,0 +1,30 @@
+{% extends "base.html" %} {% block content %}
+
+<div class="card shadow p-4">
+  <h3 class="text-center mb-4">Select Academic Session</h3>
+
+  <form method="POST">
+    <div class="mb-3">
+      <label>Academic Year</label>
+      <select name="year" class="form-control" required>
+        {% for y in years %}
+        <option value="{{ y }}" {% if y == active_year %}selected{% endif %}>
+          {{ y }}
+        </option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <div class="mb-3">
+      <label>Term</label>
+      <select name="term" class="form-control" required>
+        <option value="Term I">Term I</option>
+        <option value="Term II">Term II</option>
+      </select>
+    </div>
+
+    <button class="btn btn-primary w-100">Continue</button>
+  </form>
+</div>
+
+{% endblock %}

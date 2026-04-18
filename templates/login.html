@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h2>Admin Login</h2>
+
+<form method="POST">
+
+Department:
+<select name="department">
+{% for d in departments %}
+<option>{{ d }}</option>
+{% endfor %}
+</select><br><br>
+
+Email:
+<input type="email" name="email"><br><br>
+
+Password:
+<input type="password" name="password"><br><br>
+
+<button type="submit">Login</button>
+
+</form>
+{% endblock %}
+

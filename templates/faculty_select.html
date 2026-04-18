@@ -1,0 +1,49 @@
+{% extends "base.html" %} {% block content %}
+
+<div class="container mt-5">
+  <div class="card shadow p-4">
+    <h2 class="text-center mb-4">👨‍🏫 Faculty Timetable</h2>
+
+    <form action="/faculty" method="GET">
+      <div class="mb-3">
+        <label>Department</label>
+        <select name="department" class="form-control">
+          {% for d in departments %}
+          <option>{{ d }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="mb-3">
+        <label>Academic Year</label>
+        <select name="year" class="form-control">
+          {% for y in years %}
+          <option>{{ y }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="mb-3">
+        <label>Term</label>
+        <select name="term" class="form-control">
+          {% for t in terms %}
+          <option>{{ t }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="mb-3">
+        <label>Select Faculty</label>
+        <select name="faculty" class="form-control">
+          {% for f in faculty %}
+          <option>{{ f }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <button class="btn btn-success w-100">View Timetable</button>
+    </form>
+  </div>
+</div>
+
+{% endblock %}

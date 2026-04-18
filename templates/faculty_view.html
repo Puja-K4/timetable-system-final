@@ -1,0 +1,39 @@
+{% extends "base.html" %} {% block content %}
+
+<h2 style="text-align: center">Faculty: {{ faculty }}</h2>
+
+<table class="table table-bordered table-striped text-center">
+  <tr>
+    <th>Time</th>
+    <th>Monday</th>
+    <th>Tuesday</th>
+    <th>Wednesday</th>
+    <th>Thursday</th>
+    <th>Friday</th>
+    <th>Saturday</th>
+  </tr>
+
+  {% for time, days in timetable.items() %}
+
+  <tr>
+    <td>{{ time }}</td>
+
+    {% for day in
+    ["Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"] %}
+    <td>
+      {% for item in days[day] %} {{ item }} <br />
+      {% endfor %}
+    </td>
+    {% endfor %}
+  </tr>
+
+  {% endfor %}
+</table>
+
+<script>
+setTimeout(() => {
+    location.reload();
+}, 30000); // refresh every 30 sec
+</script>
+
+{% endblock %}

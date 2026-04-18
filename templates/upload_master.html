@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h2>Upload Master Data</h2>
+
+{% if success %}
+<p style="color:green;"><b> Master Data Uploaded Successfully!</b></p>
+{% endif %}
+
+<form method="POST" enctype="multipart/form-data">
+<input type="file" name="file" required>
+<br><br>
+<button>Upload</button>
+</form>
+
+<br><br>
+
+<a href="/admin/dashboard">⬅ Back to Dashboard</a>
+
+{% endblock %}
+
+
