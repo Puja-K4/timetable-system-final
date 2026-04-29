@@ -2,25 +2,57 @@
 
 {% block content %}
 
-<h2>Admin Login</h2>
+<div class="row justify-content-center">
+    <div class="col-md-5">
 
-<form method="POST">
+        <div class="card shadow p-4">
+            <h3 class="text-center mb-4">Admin Login</h3>
 
-Department:
-<select name="department">
-{% for d in departments %}
-<option>{{ d }}</option>
-{% endfor %}
-</select><br><br>
+            <!-- Flash messages -->
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="alert alert-danger">
+                            {{ message }}
+                        </div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
 
-Email:
-<input type="email" name="email"><br><br>
+            <form method="POST">
 
-Password:
-<input type="password" name="password"><br><br>
+                <!-- Department -->
+                <div class="mb-3">
+                    <label class="form-label">Department</label>
+                    <select name="department" class="form-select" required>
+                        <option value="">Select Department</option>
+                        {% for d in departments %}
+                        <option value="{{ d }}">{{ d }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
 
-<button type="submit">Login</button>
+                <!-- Email -->
+                <div class="mb-3">
+                    <label class="form-label">Email</label>
+                    <input type="email" name="email" class="form-control" placeholder="Enter email" required>
+                </div>
 
-</form>
+                <!-- Password -->
+                <div class="mb-3">
+                    <label class="form-label">Password</label>
+                    <input type="password" name="password" class="form-control" placeholder="Enter password" required>
+                </div>
+
+                <!-- Submit -->
+                <div class="d-grid">
+                    <button type="submit" class="btn btn-primary">Login</button>
+                </div>
+
+            </form>
+        </div>
+
+    </div>
+</div>
+
 {% endblock %}
-

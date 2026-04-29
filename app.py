@@ -1,27 +1,47 @@
-from flask import Flask, render_template, request, redirect, session, flash, url_for
-from flask import jsonify
+from flask import Flask, render_template, request, redirect, session, flash, url_for, jsonify
 from firebase_config import db
 import pandas as pd
+import os
+from functools import wraps
+from datetime import timedelta
+from werkzeug.security import check_password_hash
 
 app = Flask(__name__)
-app.secret_key = "supersecretkey"
+app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-key")
+app.permanent_session_lifetime = timedelta(minutes=30)
+
+ALLOWED_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+ALLOWED_TYPES = ["Theory", "Practical"]
+ALLOWED_TERMS = ["Term I", "Term II"]
+
+
+def admin_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not session.get('admin'):
+            flash("Please login first.", "error")
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
 
 def normalize_text(value):
     return " ".join(str(value).strip().split())
 
+
+def make_doc_id(*parts):
+    cleaned = []
+    for part in parts:
+        value = normalize_text(part).lower()
+        value = value.replace(" ", "-").replace("/", "-")
+        cleaned.append(value)
+    return "__".join(cleaned)
+
+
 def faculty_exists(name, department):
-    docs = db.collection("faculty") \
-        .where("department", "==", department) \
-        .stream()
+    doc_id = make_doc_id(department, name)
+    return db.collection("faculty").document(doc_id).get().exists
 
-    normalized_name = normalize_text(name).lower()
-
-    for doc in docs:
-        data = doc.to_dict()
-        existing_name = normalize_text(data.get("name", "")).lower()
-        if existing_name == normalized_name:
-            return True
-    return False
 
 def safe_list_from_collection(collection_name, field_name, department=None):
     query = db.collection(collection_name)
@@ -33,11 +53,35 @@ def safe_list_from_collection(collection_name, field_name, department=None):
         data = doc.to_dict()
         if data.get(field_name):
             values.append(data[field_name])
-    return values
+
+    return sorted(set(values))
+
+
+def get_allowed_subjects(department, class_name, term):
+    class_name = normalize_text(class_name)
+    term = normalize_text(term)
+
+    if not class_name or not term:
+        return []
+
+    docs = db.collection("class_subjects") \
+        .where("department", "==", department) \
+        .where("class", "==", class_name) \
+        .where("term", "==", term) \
+        .stream()
+
+    subjects = []
+    for doc in docs:
+        data = doc.to_dict()
+        subject_name = normalize_text(data.get("subject", ""))
+        if subject_name:
+            subjects.append(subject_name)
+
+    return sorted(set(subjects))
+
 
 @app.route('/')
 def home():
-
     docs = db.collection("timetable").stream()
     data = [d.to_dict() for d in docs]
 
@@ -46,70 +90,84 @@ def home():
     terms = sorted(set([d.get('term') for d in data if d.get('term')]))
     classes = sorted(set([d.get('class') for d in data if d.get('class')]))
 
-    return render_template("home.html",
-                           departments=departments,
-                           years=years,
-                           terms=terms,
-                           classes=classes)
+    return render_template(
+        "home.html",
+        departments=departments,
+        years=years,
+        terms=terms,
+        classes=classes
+    )
+
 
 @app.route('/faculty-select')
 def faculty_select():
-
     docs = db.collection("timetable").stream()
     data = [d.to_dict() for d in docs]
 
-    departments = sorted(set([d['department'] for d in data]))
-    years = sorted(set([d['year'] for d in data]))
-    terms = sorted(set([d['term'] for d in data]))
-    faculty = sorted(set([d['faculty'] for d in data]))
+    departments = sorted(set([d.get('department') for d in data if d.get('department')]))
+    years = sorted(set([d.get('year') for d in data if d.get('year')]))
+    terms = sorted(set([d.get('term') for d in data if d.get('term')]))
+    faculty = sorted(set([d.get('faculty') for d in data if d.get('faculty')]))
 
-    return render_template("faculty_select.html",
-                           departments=departments,
-                           years=years,
-                           terms=terms,
-                           faculty=faculty)
-    
-# 🔐 LOGIN PAGE
+    return render_template(
+        "faculty_select.html",
+        departments=departments,
+        years=years,
+        terms=terms,
+        faculty=faculty
+    )
+
+
 @app.route('/admin/login', methods=['GET', 'POST'])
 def login():
-
     if request.method == 'POST':
-        email = request.form['email']
-        password = request.form['password']
-        department = request.form['department']
+        email = normalize_text(request.form.get('email', ''))
+        password = request.form.get('password', '').strip()
+        department = normalize_text(request.form.get('department', ''))
 
-        admins = db.collection("admins")\
-            .where("email", "==", email)\
-            .where("department", "==", department)\
+        if not email or not password or not department:
+            flash("All fields are required.", "error")
+            return redirect(url_for('login'))
+
+        admins = db.collection("admins") \
+            .where("email", "==", email) \
+            .where("department", "==", department) \
             .stream()
 
         for admin in admins:
             data = admin.to_dict()
+            stored_password = data.get('password', '')
 
-            if data['password'] == password:
+            if stored_password and check_password_hash(stored_password, password):
+                session.clear()
+                session.permanent = True
                 session['admin'] = True
                 session['department'] = department
-                return redirect('/admin/select-session')
+                return redirect(url_for('select_session'))
 
-        return "Invalid credentials"
+        flash("Invalid email, password, or department.", "error")
+        return redirect(url_for('login'))
 
-    # Fetch departments for dropdown
-    depts = [d.to_dict()['name'] for d in db.collection("departments").stream()]
-
+    depts = [d.to_dict().get('name') for d in db.collection("departments").stream() if d.to_dict().get('name')]
+    depts = sorted(set(depts))
     return render_template("login.html", departments=depts)
 
+
 @app.route('/admin/select-session', methods=['GET', 'POST'])
+@admin_required
 def select_session():
-
-    if not session.get('admin'):
-        return redirect('/admin/login')
-
     if request.method == 'POST':
-        session['year'] = request.form['year']
-        session['term'] = request.form['term']
-        return redirect('/admin/dashboard')
+        year = normalize_text(request.form.get('year', ''))
+        term = normalize_text(request.form.get('term', ''))
 
-    # 🔥 Fetch all sessions
+        if not year or not term:
+            flash("Year and term are required.", "error")
+            return redirect(url_for('select_session'))
+
+        session['year'] = year
+        session['term'] = term
+        return redirect(url_for('dashboard'))
+
     sessions = list(db.collection("academic_sessions").stream())
 
     years = []
@@ -117,33 +175,32 @@ def select_session():
 
     for s in sessions:
         data = s.to_dict()
-        years.append(data['year'])
+        if data.get('year'):
+            years.append(data['year'])
+        if data.get('active') is True:
+            active_year = data.get('year')
 
-        if data.get('active') == True:
-            active_year = data['year']
+    years = sorted(set(years))
 
-    return render_template("select_session.html",
-                           years=years,
-                           active_year=active_year)
+    return render_template(
+        "select_session.html",
+        years=years,
+        active_year=active_year
+    )
 
-# 🏠 DASHBOARD
+
 @app.route('/admin/dashboard')
+@admin_required
 def dashboard():
-
-    if not session.get('admin'):
-        return redirect('/admin/login')
-
     if not session.get('year') or not session.get('term'):
-        return redirect('/admin/select-session')
+        return redirect(url_for('select_session'))
 
     return render_template("dashboard.html")
 
+
 @app.route('/admin/faculty', methods=['GET', 'POST'])
+@admin_required
 def faculty():
-
-    if not session.get('admin'):
-        return redirect('/admin/login')
-
     dept = session.get('department')
 
     if request.method == 'POST':
@@ -153,11 +210,14 @@ def faculty():
             flash("Faculty name is required.", "error")
             return redirect(url_for('faculty'))
 
-        if faculty_exists(name, dept):
+        doc_id = make_doc_id(dept, name)
+        doc_ref = db.collection("faculty").document(doc_id)
+
+        if doc_ref.get().exists:
             flash("Faculty already exists in this department.", "error")
             return redirect(url_for('faculty'))
 
-        db.collection("faculty").add({
+        doc_ref.set({
             "name": name,
             "department": dept
         })
@@ -165,9 +225,7 @@ def faculty():
         flash("Faculty added successfully.", "success")
         return redirect(url_for('faculty'))
 
-    docs = db.collection("faculty") \
-        .where("department", "==", dept) \
-        .stream()
+    docs = db.collection("faculty").where("department", "==", dept).stream()
 
     data = []
     for d in docs:
@@ -175,15 +233,13 @@ def faculty():
         item['id'] = d.id
         data.append(item)
 
+    data.sort(key=lambda x: x.get("name", ""))
     return render_template("faculty.html", data=data)
 
 
 @app.route('/admin/upload-master', methods=['GET', 'POST'])
+@admin_required
 def upload_master():
-
-    if not session.get('admin'):
-        return redirect('/admin/login')
-
     dept = session.get('department')
 
     if request.method == 'POST':
@@ -206,120 +262,62 @@ def upload_master():
             timeslots_df = pd.read_excel(excel_data, sheet_name="TimeSlots")
             rooms_df = pd.read_excel(excel_data, sheet_name="Rooms")
             class_subjects_df = pd.read_excel(excel_data, sheet_name="ClassSubjects")
-
         except Exception as e:
             flash(f"Error reading Excel file: {str(e)}", "error")
             return redirect(url_for('upload_master'))
-
-        # Faculty
-        existing_faculty = set()
-        for doc in db.collection("faculty").where("department", "==", dept).stream():
-            data = doc.to_dict()
-            existing_faculty.add(normalize_text(data.get("name", "")).lower())
 
         for _, row in faculty_df.iterrows():
             name = normalize_text(row.get("name", ""))
             if not name:
                 continue
-            if name.lower() not in existing_faculty:
-                db.collection("faculty").add({
-                    "name": name,
-                    "department": dept
-                })
-                existing_faculty.add(name.lower())
 
-        # Subjects
-        existing_subjects = set()
-        for doc in db.collection("subjects").where("department", "==", dept).stream():
-            data = doc.to_dict()
-            existing_subjects.add(normalize_text(data.get("name", "")).lower())
+            doc_id = make_doc_id(dept, name)
+            db.collection("faculty").document(doc_id).set({
+                "name": name,
+                "department": dept
+            })
 
         for _, row in subjects_df.iterrows():
             subject_name = normalize_text(row.get("subject", ""))
             if not subject_name:
                 continue
-            if subject_name.lower() not in existing_subjects:
-                db.collection("subjects").add({
-                    "name": subject_name,
-                    "department": dept
-                })
-                existing_subjects.add(subject_name.lower())
 
-        # Classes
-        existing_classes = set()
-        for doc in db.collection("classes").where("department", "==", dept).stream():
-            data = doc.to_dict()
-            existing_classes.add(normalize_text(data.get("name", "")).lower())
+            doc_id = make_doc_id(dept, subject_name)
+            db.collection("subjects").document(doc_id).set({
+                "name": subject_name,
+                "department": dept
+            })
 
         for _, row in classes_df.iterrows():
             class_name = normalize_text(row.get("class", ""))
             if not class_name:
                 continue
-            if class_name.lower() not in existing_classes:
-                db.collection("classes").add({
-                    "name": class_name,
-                    "department": dept
-                })
-                existing_classes.add(class_name.lower())
 
-        # TimeSlots
-        existing_slots = set()
-        for doc in db.collection("timeslots").stream():
-            data = doc.to_dict()
-            existing_slots.add(normalize_text(data.get("slot", "")).lower())
+            doc_id = make_doc_id(dept, class_name)
+            db.collection("classes").document(doc_id).set({
+                "name": class_name,
+                "department": dept
+            })
 
         for _, row in timeslots_df.iterrows():
             slot = normalize_text(row.get("slot", ""))
             if not slot:
                 continue
-            if slot.lower() not in existing_slots:
-                db.collection("timeslots").add({
-                    "slot": slot
-                })
-                existing_slots.add(slot.lower())
 
-        # Rooms
-        existing_rooms = set()
-        for doc in db.collection("rooms").stream():
-            data = doc.to_dict()
-            existing_rooms.add(normalize_text(data.get("room", "")).lower())
+            doc_id = make_doc_id(slot)
+            db.collection("timeslots").document(doc_id).set({
+                "slot": slot
+            })
 
         for _, row in rooms_df.iterrows():
             room = normalize_text(row.get("room", ""))
             if not room:
                 continue
-            if room.lower() not in existing_rooms:
-                db.collection("rooms").add({
-                    "room": room
-                })
-                existing_rooms.add(room.lower())
 
-        # Refresh valid classes and subjects after upload
-        valid_classes = set()
-        for doc in db.collection("classes").where("department", "==", dept).stream():
-            data = doc.to_dict()
-            valid_classes.add(normalize_text(data.get("name", "")))
-
-        valid_subjects = set()
-        for doc in db.collection("subjects").where("department", "==", dept).stream():
-            data = doc.to_dict()
-            valid_subjects.add(normalize_text(data.get("name", "")))
-
-        allowed_terms = {"Term I", "Term II"}
-
-        # ClassSubjects mapping
-        existing_mappings = set()
-        for doc in db.collection("class_subjects").where("department", "==", dept).stream():
-            data = doc.to_dict()
-            key = (
-                normalize_text(data.get("class", "")),
-                normalize_text(data.get("term", "")),
-                normalize_text(data.get("subject", ""))
-            )
-            existing_mappings.add(key)
-
-        added_mappings = 0
-        skipped_mappings = 0
+            doc_id = make_doc_id(room)
+            db.collection("rooms").document(doc_id).set({
+                "room": room
+            })
 
         for _, row in class_subjects_df.iterrows():
             class_name = normalize_text(row.get("class", ""))
@@ -327,53 +325,32 @@ def upload_master():
             subject_name = normalize_text(row.get("subject", ""))
 
             if not class_name or not term or not subject_name:
-                skipped_mappings += 1
                 continue
 
-            if class_name not in valid_classes:
-                skipped_mappings += 1
+            if term not in ALLOWED_TERMS:
                 continue
 
-            if subject_name not in valid_subjects:
-                skipped_mappings += 1
-                continue
-
-            if term not in allowed_terms:
-                skipped_mappings += 1
-                continue
-
-            key = (class_name, term, subject_name)
-
-            if key in existing_mappings:
-                skipped_mappings += 1
-                continue
-
-            db.collection("class_subjects").add({
+            doc_id = make_doc_id(dept, class_name, term, subject_name)
+            db.collection("class_subjects").document(doc_id).set({
                 "department": dept,
                 "class": class_name,
                 "term": term,
                 "subject": subject_name
             })
-            existing_mappings.add(key)
-            added_mappings += 1
 
-        flash(f"Master data uploaded successfully. ClassSubjects added: {added_mappings}, skipped: {skipped_mappings}", "success")
+        flash("Master data uploaded successfully.", "success")
         return redirect(url_for('upload_master'))
 
-    success = request.args.get('success')
-    return render_template("upload_master.html", success=success)
+    return render_template("upload_master.html")
+
 
 @app.route('/admin/class-subjects', methods=['GET', 'POST'])
+@admin_required
 def class_subjects():
-
-    if not session.get('admin'):
-        return redirect('/admin/login')
-
     dept = session.get('department')
 
     classes = safe_list_from_collection("classes", "name", dept)
     subjects = safe_list_from_collection("subjects", "name", dept)
-    terms = ["Term I", "Term II"]
 
     if request.method == 'POST':
         class_name = normalize_text(request.form.get('class', ''))
@@ -392,22 +369,18 @@ def class_subjects():
             flash("Invalid subject selected.", "error")
             return redirect(url_for('class_subjects'))
 
-        if term not in terms:
+        if term not in ALLOWED_TERMS:
             flash("Invalid term selected.", "error")
             return redirect(url_for('class_subjects'))
 
-        existing = db.collection("class_subjects") \
-            .where("department", "==", dept) \
-            .where("class", "==", class_name) \
-            .where("term", "==", term) \
-            .where("subject", "==", subject) \
-            .stream()
+        doc_id = make_doc_id(dept, class_name, term, subject)
+        doc_ref = db.collection("class_subjects").document(doc_id)
 
-        for _ in existing:
+        if doc_ref.get().exists:
             flash("This subject is already assigned to this class and term.", "error")
             return redirect(url_for('class_subjects'))
 
-        db.collection("class_subjects").add({
+        doc_ref.set({
             "department": dept,
             "class": class_name,
             "term": term,
@@ -417,9 +390,7 @@ def class_subjects():
         flash("Subject assigned to class and term successfully.", "success")
         return redirect(url_for('class_subjects'))
 
-    docs = db.collection("class_subjects") \
-        .where("department", "==", dept) \
-        .stream()
+    docs = db.collection("class_subjects").where("department", "==", dept).stream()
 
     data = []
     for d in docs:
@@ -433,16 +404,14 @@ def class_subjects():
         "class_subjects.html",
         classes=classes,
         subjects=subjects,
-        terms=terms,
+        terms=ALLOWED_TERMS,
         data=data
     )
 
+
 @app.route('/admin/delete-class-subject/<id>')
+@admin_required
 def delete_class_subject(id):
-
-    if not session.get('admin'):
-        return redirect('/admin/login')
-
     doc = db.collection("class_subjects").document(id).get()
 
     if not doc.exists:
@@ -453,12 +422,10 @@ def delete_class_subject(id):
     flash("Mapping deleted successfully.", "success")
     return redirect(url_for('class_subjects'))
 
+
 @app.route('/admin/upload-faculty', methods=['POST'])
+@admin_required
 def upload_faculty():
-
-    if not session.get('admin'):
-        return redirect('/admin/login')
-
     if 'file' not in request.files:
         flash("No file selected.", "error")
         return redirect(url_for('faculty'))
@@ -498,11 +465,14 @@ def upload_faculty():
             skipped_count += 1
             continue
 
-        if faculty_exists(name, dept):
+        doc_id = make_doc_id(dept, name)
+        doc_ref = db.collection("faculty").document(doc_id)
+
+        if doc_ref.get().exists:
             skipped_count += 1
             continue
 
-        db.collection("faculty").add({
+        doc_ref.set({
             "name": name,
             "department": dept
         })
@@ -513,12 +483,10 @@ def upload_faculty():
     flash(f"Faculty upload complete. Added: {added_count}, Skipped: {skipped_count}", "success")
     return redirect(url_for('faculty'))
 
+
 @app.route('/admin/delete-faculty/<id>')
+@admin_required
 def delete_faculty(id):
-
-    if not session.get('admin'):
-        return redirect('/admin/login')
-
     faculty_doc = db.collection("faculty").document(id).get()
 
     if not faculty_doc.exists:
@@ -542,17 +510,17 @@ def delete_faculty(id):
     flash("Faculty deleted successfully.", "success")
     return redirect(url_for('faculty'))
 
+
 @app.route('/department')
 def department():
-
     dept = request.args.get('department')
     year = request.args.get('year')
     term = request.args.get('term')
 
-    docs = db.collection("timetable")\
-        .where("department","==",dept)\
-        .where("year","==",year)\
-        .where("term","==",term)\
+    docs = db.collection("timetable") \
+        .where("department", "==", dept) \
+        .where("year", "==", year) \
+        .where("term", "==", term) \
         .stream()
 
     data = [d.to_dict() for d in docs]
@@ -560,7 +528,6 @@ def department():
     timetable = {}
 
     for entry in data:
-
         key = (entry['time'], entry['class'])
 
         if key not in timetable:
@@ -575,26 +542,25 @@ def department():
 
         day = entry['day']
 
-        # 🎯 FORMAT TEXT
         if entry['type'] == "Practical":
-            text = f"{entry['subject']} ({entry['faculty']}) [{entry.get('batch','')}] ({entry.get('room','')})"
+            text = f"{entry['subject']} ({entry['faculty']}) [{entry.get('batch', '')}] ({entry.get('room', '')})"
         else:
-            text = f"{entry['subject']} ({entry['faculty']}) ({entry.get('room','')})"
+            text = f"{entry['subject']} ({entry['faculty']}) ({entry.get('room', '')})"
 
         timetable[key][day].append(text)
 
-    return render_template("department.html",
-                           timetable=timetable,
-                           dept=dept,
-                           year=year,
-                           term=term)
+    return render_template(
+        "department.html",
+        timetable=timetable,
+        dept=dept,
+        year=year,
+        term=term
+    )
+
 
 @app.route('/admin/departments', methods=['GET', 'POST'])
+@admin_required
 def departments():
-
-    if not session.get('admin'):
-        return redirect('/admin/login')
-
     if request.method == 'POST':
         name = normalize_text(request.form.get('name', ''))
 
@@ -602,17 +568,14 @@ def departments():
             flash("Department name is required.", "error")
             return redirect(url_for('departments'))
 
-        docs = db.collection("departments").stream()
-        for d in docs:
-            data = d.to_dict()
-            if normalize_text(data.get("name", "")).lower() == name.lower():
-                flash("Department already exists.", "error")
-                return redirect(url_for('departments'))
+        doc_id = make_doc_id(name)
+        doc_ref = db.collection("departments").document(doc_id)
 
-        db.collection("departments").add({
-            "name": name
-        })
+        if doc_ref.get().exists:
+            flash("Department already exists.", "error")
+            return redirect(url_for('departments'))
 
+        doc_ref.set({"name": name})
         flash("Department added successfully.", "success")
         return redirect(url_for('departments'))
 
@@ -624,14 +587,13 @@ def departments():
         item['id'] = d.id
         data.append(item)
 
+    data.sort(key=lambda x: x.get("name", ""))
     return render_template("departments.html", data=data)
 
+
 @app.route('/admin/classes', methods=['GET', 'POST'])
+@admin_required
 def classes_admin():
-
-    if not session.get('admin'):
-        return redirect('/admin/login')
-
     dept = session.get('department')
 
     if request.method == 'POST':
@@ -641,14 +603,14 @@ def classes_admin():
             flash("Class name is required.", "error")
             return redirect(url_for('classes_admin'))
 
-        docs = db.collection("classes").where("department", "==", dept).stream()
-        for d in docs:
-            data = d.to_dict()
-            if normalize_text(data.get("name", "")).lower() == name.lower():
-                flash("Class already exists in this department.", "error")
-                return redirect(url_for('classes_admin'))
+        doc_id = make_doc_id(dept, name)
+        doc_ref = db.collection("classes").document(doc_id)
 
-        db.collection("classes").add({
+        if doc_ref.get().exists:
+            flash("Class already exists in this department.", "error")
+            return redirect(url_for('classes_admin'))
+
+        doc_ref.set({
             "name": name,
             "department": dept
         })
@@ -664,14 +626,13 @@ def classes_admin():
         item['id'] = d.id
         data.append(item)
 
+    data.sort(key=lambda x: x.get("name", ""))
     return render_template("classes.html", data=data)
 
+
 @app.route('/admin/delete-class/<id>')
+@admin_required
 def delete_class(id):
-
-    if not session.get('admin'):
-        return redirect('/admin/login')
-
     class_doc = db.collection("classes").document(id).get()
 
     if not class_doc.exists:
@@ -691,16 +652,23 @@ def delete_class(id):
         flash("Cannot delete class because it is used in timetable.", "error")
         return redirect(url_for('classes_admin'))
 
+    mapping_docs = db.collection("class_subjects") \
+        .where("class", "==", class_name) \
+        .where("department", "==", dept) \
+        .stream()
+
+    for _ in mapping_docs:
+        flash("Cannot delete class because it is used in class-subject mapping.", "error")
+        return redirect(url_for('classes_admin'))
+
     db.collection("classes").document(id).delete()
     flash("Class deleted successfully.", "success")
     return redirect(url_for('classes_admin'))
 
+
 @app.route('/admin/subjects', methods=['GET', 'POST'])
+@admin_required
 def subjects_admin():
-
-    if not session.get('admin'):
-        return redirect('/admin/login')
-
     dept = session.get('department')
 
     if request.method == 'POST':
@@ -710,14 +678,14 @@ def subjects_admin():
             flash("Subject name is required.", "error")
             return redirect(url_for('subjects_admin'))
 
-        docs = db.collection("subjects").where("department", "==", dept).stream()
-        for d in docs:
-            data = d.to_dict()
-            if normalize_text(data.get("name", "")).lower() == name.lower():
-                flash("Subject already exists in this department.", "error")
-                return redirect(url_for('subjects_admin'))
+        doc_id = make_doc_id(dept, name)
+        doc_ref = db.collection("subjects").document(doc_id)
 
-        db.collection("subjects").add({
+        if doc_ref.get().exists:
+            flash("Subject already exists in this department.", "error")
+            return redirect(url_for('subjects_admin'))
+
+        doc_ref.set({
             "name": name,
             "department": dept
         })
@@ -733,14 +701,13 @@ def subjects_admin():
         item['id'] = d.id
         data.append(item)
 
+    data.sort(key=lambda x: x.get("name", ""))
     return render_template("subjects.html", data=data)
 
+
 @app.route('/admin/delete-subject/<id>')
+@admin_required
 def delete_subject(id):
-
-    if not session.get('admin'):
-        return redirect('/admin/login')
-
     subject_doc = db.collection("subjects").document(id).get()
 
     if not subject_doc.exists:
@@ -760,75 +727,50 @@ def delete_subject(id):
         flash("Cannot delete subject because it is used in timetable.", "error")
         return redirect(url_for('subjects_admin'))
 
+    mapping_docs = db.collection("class_subjects") \
+        .where("subject", "==", subject_name) \
+        .where("department", "==", dept) \
+        .stream()
+
+    for _ in mapping_docs:
+        flash("Cannot delete subject because it is used in class-subject mapping.", "error")
+        return redirect(url_for('subjects_admin'))
+
     db.collection("subjects").document(id).delete()
     flash("Subject deleted successfully.", "success")
     return redirect(url_for('subjects_admin'))
 
+
 @app.route('/admin/get-subjects')
+@admin_required
 def get_subjects_for_class():
-
-    if not session.get('admin'):
-        return jsonify([])
-
     dept = session.get('department')
     class_name = normalize_text(request.args.get('class', ''))
     term = normalize_text(request.args.get('term', ''))
 
-    if not class_name or not term:
-        return jsonify([])
-
-    docs = db.collection("class_subjects") \
-        .where("department", "==", dept) \
-        .where("class", "==", class_name) \
-        .where("term", "==", term) \
-        .stream()
-
-    subjects = sorted(set([
-        d.to_dict().get("subject")
-        for d in docs if d.to_dict().get("subject")
-    ]))
-
+    subjects = get_allowed_subjects(dept, class_name, term)
     return jsonify(subjects)
 
+
 @app.route('/admin/add-timetable', methods=['GET', 'POST'])
+@admin_required
 def add_timetable():
-
-    if not session.get('admin'):
-        return redirect('/admin/login')
-
     if not session.get('year') or not session.get('term'):
-        return redirect('/admin/select-session')
+        return redirect(url_for('select_session'))
 
     dept = session.get('department')
+    current_term = session.get('term')
 
     classes = safe_list_from_collection("classes", "name", dept)
     selected_class = normalize_text(request.form.get('class', ''))
-    selected_term = session.get('term')
-
-    subjects = []
-
-    if selected_class and selected_term:
-        docs = db.collection("class_subjects") \
-            .where("department", "==", dept) \
-            .where("class", "==", selected_class) \
-            .where("term", "==", selected_term) \
-            .stream()
-
-        subjects = sorted(set([
-            d.to_dict().get("subject")
-            for d in docs if d.to_dict().get("subject")
-        ]))
+    subjects = get_allowed_subjects(dept, selected_class, current_term) if selected_class else []
     faculty = safe_list_from_collection("faculty", "name", dept)
     timeslots = safe_list_from_collection("timeslots", "slot")
     rooms = safe_list_from_collection("rooms", "room")
 
     message = ""
 
-    allowed_days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
-    allowed_types = ["Theory", "Practical"]
-
     if request.method == 'POST':
-
         data = {
             "department": dept,
             "year": normalize_text(request.form.get('year', '')),
@@ -842,7 +784,7 @@ def add_timetable():
             "batch": normalize_text(request.form.get('batch', '')),
             "room": normalize_text(request.form.get('room', ''))
         }
-        
+
         if data['type'] == "Theory":
             data['batch'] = ''
 
@@ -852,10 +794,10 @@ def add_timetable():
                 message = f"❌ {field.capitalize()} is required."
                 break
 
-        if not message and data['day'] not in allowed_days:
+        if not message and data['day'] not in ALLOWED_DAYS:
             message = "❌ Invalid day selected."
 
-        if not message and data['type'] not in allowed_types:
+        if not message and data['type'] not in ALLOWED_TYPES:
             message = "❌ Invalid lecture type selected."
 
         if not message and data['time'] not in timeslots:
@@ -864,8 +806,9 @@ def add_timetable():
         if not message and data['class'] not in classes:
             message = "❌ Invalid class selected."
 
-        if not message and data['subject'] not in subjects:
-            message = "❌ Invalid subject selected."
+        allowed_subjects = get_allowed_subjects(dept, data['class'], data['term'])
+        if not message and data['subject'] not in allowed_subjects:
+            message = "❌ Selected subject is not assigned to this class for this term."
 
         if not message and data['faculty'] not in faculty:
             message = "❌ Invalid faculty selected."
@@ -910,7 +853,9 @@ def add_timetable():
             flash("Timetable entry added successfully.", "success")
             return redirect(url_for('add_timetable'))
 
-    # existing timetable list for this admin session
+        selected_class = data['class']
+        subjects = get_allowed_subjects(dept, selected_class, current_term) if selected_class else []
+
     docs = db.collection("timetable") \
         .where("department", "==", dept) \
         .where("year", "==", session.get('year')) \
@@ -949,13 +894,11 @@ def add_timetable():
         message=message,
         entries=entries
     )
-    
+
+
 @app.route('/admin/delete-timetable/<id>')
+@admin_required
 def delete_timetable(id):
-
-    if not session.get('admin'):
-        return redirect('/admin/login')
-
     doc = db.collection("timetable").document(id).get()
 
     if not doc.exists:
@@ -966,19 +909,16 @@ def delete_timetable(id):
     flash("Timetable entry deleted successfully.", "success")
     return redirect(url_for('add_timetable'))
 
+
 @app.route('/admin/edit-timetable/<id>', methods=['GET', 'POST'])
+@admin_required
 def edit_timetable(id):
-
-    if not session.get('admin'):
-        return redirect('/admin/login')
-
     if not session.get('year') or not session.get('term'):
-        return redirect('/admin/select-session')
+        return redirect(url_for('select_session'))
 
     dept = session.get('department')
 
     doc = db.collection("timetable").document(id).get()
-
     if not doc.exists:
         flash("Timetable entry not found.", "error")
         return redirect(url_for('add_timetable'))
@@ -986,15 +926,12 @@ def edit_timetable(id):
     entry = doc.to_dict()
 
     classes = safe_list_from_collection("classes", "name", dept)
-    subjects = safe_list_from_collection("subjects", "name", dept)
     faculty = safe_list_from_collection("faculty", "name", dept)
     timeslots = safe_list_from_collection("timeslots", "slot")
     rooms = safe_list_from_collection("rooms", "room")
+    subjects = get_allowed_subjects(dept, entry.get('class', ''), entry.get('term', ''))
 
     message = ""
-
-    allowed_days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
-    allowed_types = ["Theory", "Practical"]
 
     if request.method == 'POST':
         data = {
@@ -1010,21 +947,32 @@ def edit_timetable(id):
             "batch": normalize_text(request.form.get('batch', '')),
             "room": normalize_text(request.form.get('room', ''))
         }
-        
+
         if data['type'] == "Theory":
             data['batch'] = ''
+
+        subjects = get_allowed_subjects(dept, data['class'], data['term'])
 
         required_fields = ['year', 'term', 'class', 'day', 'time', 'subject', 'faculty', 'type', 'room']
         for field in required_fields:
             if not data[field]:
                 message = f"❌ {field.capitalize()} is required."
-                return render_template("edit_timetable.html", entry=entry, classes=classes, subjects=subjects, faculty=faculty, timeslots=timeslots, rooms=rooms, message=message)
+                return render_template(
+                    "edit_timetable.html",
+                    entry=data,
+                    classes=classes,
+                    subjects=subjects,
+                    faculty=faculty,
+                    timeslots=timeslots,
+                    rooms=rooms,
+                    message=message
+                )
 
-        if data['day'] not in allowed_days:
+        if data['day'] not in ALLOWED_DAYS:
             message = "❌ Invalid day selected."
             return render_template("edit_timetable.html", entry=data, classes=classes, subjects=subjects, faculty=faculty, timeslots=timeslots, rooms=rooms, message=message)
 
-        if data['type'] not in allowed_types:
+        if data['type'] not in ALLOWED_TYPES:
             message = "❌ Invalid lecture type selected."
             return render_template("edit_timetable.html", entry=data, classes=classes, subjects=subjects, faculty=faculty, timeslots=timeslots, rooms=rooms, message=message)
 
@@ -1037,7 +985,7 @@ def edit_timetable(id):
             return render_template("edit_timetable.html", entry=data, classes=classes, subjects=subjects, faculty=faculty, timeslots=timeslots, rooms=rooms, message=message)
 
         if data['subject'] not in subjects:
-            message = "❌ Invalid subject selected."
+            message = "❌ Selected subject is not assigned to this class for this term."
             return render_template("edit_timetable.html", entry=data, classes=classes, subjects=subjects, faculty=faculty, timeslots=timeslots, rooms=rooms, message=message)
 
         if data['faculty'] not in faculty:
@@ -1087,28 +1035,30 @@ def edit_timetable(id):
         flash("Timetable entry updated successfully.", "success")
         return redirect(url_for('add_timetable'))
 
-    return render_template("edit_timetable.html",
-                           entry=entry,
-                           classes=classes,
-                           subjects=subjects,
-                           faculty=faculty,
-                           timeslots=timeslots,
-                           rooms=rooms,
-                           message=message)
-    
+    return render_template(
+        "edit_timetable.html",
+        entry=entry,
+        classes=classes,
+        subjects=subjects,
+        faculty=faculty,
+        timeslots=timeslots,
+        rooms=rooms,
+        message=message
+    )
+
+
 @app.route('/class')
 def class_view():
-
     cls = request.args.get('class')
     dept = request.args.get('department')
     year = request.args.get('year')
     term = request.args.get('term')
 
-    docs = db.collection("timetable")\
-        .where("department","==",dept)\
-        .where("year","==",year)\
-        .where("term","==",term)\
-        .where("class","==",cls)\
+    docs = db.collection("timetable") \
+        .where("department", "==", dept) \
+        .where("year", "==", year) \
+        .where("term", "==", term) \
+        .where("class", "==", cls) \
         .stream()
 
     data = [d.to_dict() for d in docs]
@@ -1116,7 +1066,6 @@ def class_view():
     timetable = {}
 
     for entry in data:
-
         time = entry['time']
 
         if time not in timetable:
@@ -1132,34 +1081,27 @@ def class_view():
         day = entry['day']
 
         if entry['type'] == "Practical":
-            text = f"{entry['subject']} ({entry['faculty']}) [{entry.get('batch','')}] ({entry.get('room','')})"
+            text = f"{entry['subject']} ({entry['faculty']}) [{entry.get('batch', '')}] ({entry.get('room', '')})"
         else:
-            text = f"{entry['subject']} ({entry['faculty']}) ({entry.get('room','')})"
+            text = f"{entry['subject']} ({entry['faculty']}) ({entry.get('room', '')})"
 
         timetable[time][day].append(text)
-    
-    print("Class:", cls)
-    print("Dept:", dept)
-    print("Year:", year)
-    print("Term:", term)
 
-    return render_template("class.html",
-                           timetable=timetable,
-                           cls=cls)
+    return render_template("class.html", timetable=timetable, cls=cls)
+
 
 @app.route('/faculty')
 def faculty_view():
-
     faculty = request.args.get('faculty')
     dept = request.args.get('department')
     year = request.args.get('year')
     term = request.args.get('term')
 
-    docs = db.collection("timetable")\
-        .where("department","==",dept)\
-        .where("year","==",year)\
-        .where("term","==",term)\
-        .where("faculty","==",faculty)\
+    docs = db.collection("timetable") \
+        .where("department", "==", dept) \
+        .where("year", "==", year) \
+        .where("term", "==", term) \
+        .where("faculty", "==", faculty) \
         .stream()
 
     data = [d.to_dict() for d in docs]
@@ -1167,7 +1109,6 @@ def faculty_view():
     timetable = {}
 
     for entry in data:
-
         time = entry['time']
 
         if time not in timetable:
@@ -1181,20 +1122,17 @@ def faculty_view():
             }
 
         day = entry['day']
-
-        text = f"{entry['subject']} ({entry['class']}) ({entry.get('room','')})"
-
+        text = f"{entry['subject']} ({entry['class']}) ({entry.get('room', '')})"
         timetable[time][day].append(text)
 
-    return render_template("faculty_view.html",
-                           timetable=timetable,
-                           faculty=faculty)
-       
-# 🚪 LOGOUT
+    return render_template("faculty_view.html", timetable=timetable, faculty=faculty)
+
+
 @app.route('/admin/logout')
 def logout():
     session.clear()
-    return redirect('/admin/login')
+    flash("Logged out successfully.", "success")
+    return redirect(url_for('login'))
 
 
 if __name__ == '__main__':
